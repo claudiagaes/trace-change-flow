@@ -157,9 +157,9 @@ export default function NewChange() {
   };
 
   return (
-    <div className="flex min-h-screen">
+    <div className="flex h-full">
       {/* Left Sidebar - Steps */}
-      <aside className="w-64 border-r bg-muted/30 p-4 flex flex-col">
+      <aside className="w-64 border-r bg-muted/30 p-4 flex flex-col shrink-0">
         <div className="mb-6">
           <Button variant="ghost" size="sm" onClick={() => navigate('/dashboard')} className="mb-4 -ml-2">
             <ArrowLeft className="w-4 h-4 mr-2" />
@@ -213,7 +213,7 @@ export default function NewChange() {
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 p-6 lg:p-8 overflow-auto">
+      <main className="flex-1 p-6 lg:p-8 overflow-auto min-w-0">
         <div className="max-w-3xl mx-auto">
           {/* Step Content */}
           <Card className="border-2">
