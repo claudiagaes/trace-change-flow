@@ -21,6 +21,7 @@ function AppRoutes() {
     <AppLayout>
       <Routes>
         <Route path="/" element={<Navigate to="/dashboard" replace />} />
+        <Route path="/auth" element={<Navigate to="/dashboard" replace />} />
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/change/new" element={<NewChange />} />
         <Route path="/change/:id" element={<ChangeDetail />} />
@@ -29,7 +30,7 @@ function AppRoutes() {
         <Route path="/tasks/:id" element={<TaskDetail />} />
         <Route path="/history" element={<History />} />
         <Route path="/notifications" element={<Notifications />} />
-        <Route path="*" element={<NotFound />} />
+        <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>
     </AppLayout>
   );
