@@ -157,52 +157,66 @@ export default function NewChange() {
   };
 
   return (
-    <div className="p-6 lg:p-8 max-w-5xl mx-auto">
-      {/* Header */}
-      <div className="mb-8">
-        <Button variant="ghost" onClick={() => navigate('/dashboard')} className="mb-4">
-          <ArrowLeft className="w-4 h-4 mr-2" />
-          Back to Dashboard
-        </Button>
-        <h1 className="text-3xl font-bold tracking-tight">New Engineering Change Notice</h1>
-        <p className="text-muted-foreground mt-1">Upload drawings, AI detects changes, tasks auto-assigned</p>
-      </div>
-
-      {/* Progress Steps */}
-      <div className="mb-8">
-        <div className="flex items-center justify-between">
-          {STEPS.map((step, index) => (
-            <div key={step.id} className="flex items-center">
-              <div className="flex flex-col items-center">
-                <div
-                  className={cn(
-                    'w-10 h-10 rounded-full flex items-center justify-center font-semibold text-sm border-2 transition-colors',
-                    currentStep > step.id
-                      ? 'bg-success text-success-foreground border-success'
-                      : currentStep === step.id
-                      ? 'bg-primary text-primary-foreground border-primary'
-                      : 'bg-muted text-muted-foreground border-border'
-                  )}
-                >
-                  {currentStep > step.id ? <Check className="w-5 h-5" /> : step.id}
-                </div>
-                <span className="text-xs mt-2 font-medium hidden sm:block text-center max-w-[80px]">{step.title}</span>
-              </div>
-              {index < STEPS.length - 1 && (
-                <div
-                  className={cn(
-                    'h-1 w-6 sm:w-12 lg:w-20 mx-1 sm:mx-2',
-                    currentStep > step.id ? 'bg-success' : 'bg-border'
-                  )}
-                />
-              )}
-            </div>
-          ))}
+    <div className="flex min-h-screen">
+      {/* Left Sidebar - Steps */}
+      <aside className="w-64 border-r bg-muted/30 p-4 flex flex-col">
+        <div className="mb-6">
+          <Button variant="ghost" size="sm" onClick={() => navigate('/dashboard')} className="mb-4 -ml-2">
+            <ArrowLeft className="w-4 h-4 mr-2" />
+            Back
+          </Button>
+          <h1 className="text-lg font-bold tracking-tight">New ECN</h1>
+          <p className="text-xs text-muted-foreground mt-1">Engineering Change Notice</p>
         </div>
-      </div>
 
-      {/* Step Content */}
-      <Card className="border-2">
+        <nav className="space-y-1 flex-1">
+          {STEPS.map((step) => (
+            <button
+              key={step.id}
+              onClick={() => {
+                // Only allow going back or to completed steps
+                if (step.id < currentStep) setCurrentStep(step.id);
+              }}
+              className={cn(
+                'w-full flex items-start gap-3 p-3 rounded-lg text-left transition-colors',
+                currentStep === step.id
+                  ? 'bg-primary text-primary-foreground'
+                  : currentStep > step.id
+                  ? 'bg-success/10 text-success hover:bg-success/20 cursor-pointer'
+                  : 'text-muted-foreground cursor-not-allowed'
+              )}
+            >
+              <div
+                className={cn(
+                  'w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 border-2',
+                  currentStep === step.id
+                    ? 'bg-primary-foreground text-primary border-primary-foreground'
+                    : currentStep > step.id
+                    ? 'bg-success text-success-foreground border-success'
+                    : 'bg-muted border-border'
+                )}
+              >
+                {currentStep > step.id ? <Check className="w-4 h-4" /> : step.id}
+              </div>
+              <div className="min-w-0">
+                <p className="font-medium text-sm truncate">{step.title}</p>
+                <p className={cn(
+                  'text-xs truncate',
+                  currentStep === step.id ? 'text-primary-foreground/70' : 'text-muted-foreground'
+                )}>
+                  {step.description}
+                </p>
+              </div>
+            </button>
+          ))}
+        </nav>
+      </aside>
+
+      {/* Main Content */}
+      <main className="flex-1 p-6 lg:p-8 overflow-auto">
+        <div className="max-w-3xl mx-auto">
+          {/* Step Content */}
+          <Card className="border-2">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             {currentStep === 2 && <Sparkles className="w-5 h-5 text-primary" />}
@@ -531,30 +545,32 @@ export default function NewChange() {
             </div>
           )}
         </CardContent>
-      </Card>
+          </Card>
 
-      {/* Navigation */}
-      <div className="flex items-center justify-between mt-6">
-        <Button
-          variant="outline"
-          onClick={() => setCurrentStep(currentStep - 1)}
-          disabled={currentStep === 1}
-        >
-          <ArrowLeft className="w-4 h-4 mr-2" />
-          Back
-        </Button>
-        {currentStep < 5 ? (
-          <Button onClick={() => setCurrentStep(currentStep + 1)} disabled={!canProceed()}>
-            Next
-            <ArrowRight className="w-4 h-4 ml-2" />
-          </Button>
-        ) : (
-          <Button onClick={handleSubmit} disabled={!canProceed()} className="gap-2">
-            <Check className="w-4 h-4" />
-            Create ECN
-          </Button>
-        )}
-      </div>
+          {/* Navigation */}
+          <div className="flex items-center justify-between mt-6">
+            <Button
+              variant="outline"
+              onClick={() => setCurrentStep(currentStep - 1)}
+              disabled={currentStep === 1}
+            >
+              <ArrowLeft className="w-4 h-4 mr-2" />
+              Back
+            </Button>
+            {currentStep < 5 ? (
+              <Button onClick={() => setCurrentStep(currentStep + 1)} disabled={!canProceed()}>
+                Next
+                <ArrowRight className="w-4 h-4 ml-2" />
+              </Button>
+            ) : (
+              <Button onClick={handleSubmit} disabled={!canProceed()} className="gap-2">
+                <Check className="w-4 h-4" />
+                Create ECN
+              </Button>
+            )}
+          </div>
+        </div>
+      </main>
     </div>
   );
 }
