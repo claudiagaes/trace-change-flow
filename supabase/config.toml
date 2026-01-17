@@ -1,1 +1,4 @@
 project_id = "tztjoeaemyjquvshsmvq"
+
+[functions.analyze-cad-changes]
+verify_jwt = false

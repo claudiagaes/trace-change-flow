@@ -1,5 +1,16 @@
 import { AppRole, ChangeClassification, DependencyConfig } from './types';
 
+// Classification options for the wizard
+export const CLASSIFICATION_OPTIONS: { key: keyof ChangeClassification; label: string; description: string }[] = [
+  { key: 'geometry_changed', label: 'Geometry / Dimensions', description: 'Physical shape or size changed' },
+  { key: 'material_changed', label: 'Material', description: 'Different material specification' },
+  { key: 'tolerances_changed', label: 'Tolerances', description: 'Tolerance requirements changed' },
+  { key: 'weight_changed', label: 'Weight', description: 'Part weight is different' },
+  { key: 'surface_finish_changed', label: 'Surface Finish', description: 'Surface treatment changed' },
+  { key: 'supplier_changed', label: 'Supplier', description: 'Different supplier for part' },
+  { key: 'process_changed', label: 'Process Assumption', description: 'Manufacturing process changed' },
+];
+
 // Dependency mapping rules based on what changed
 export const DEPENDENCY_RULES: DependencyConfig[] = [
   // Maintenance impacts
