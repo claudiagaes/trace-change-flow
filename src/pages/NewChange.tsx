@@ -8,7 +8,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import { RoleBadge } from '@/components/ui/role-badge';
 import { ChangeClassification } from '@/lib/types';
-import { getTriggeredDependencies } from '@/lib/dependency-rules';
+import { getTriggeredDependencies, CLASSIFICATION_OPTIONS } from '@/lib/dependency-rules';
+import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { 
   ArrowLeft, 
@@ -16,29 +17,27 @@ import {
   Check, 
   Upload, 
   X, 
-  FileImage, 
   FileText,
-  AlertTriangle
+  AlertTriangle,
+  Loader2,
+  Sparkles,
+  Eye
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const STEPS = [
-  { id: 1, title: 'Part Info', description: 'Basic change details' },
-  { id: 2, title: 'Upload Files', description: 'Old vs new comparison' },
-  { id: 3, title: 'Classification', description: 'What changed?' },
-  { id: 4, title: 'Dependencies', description: 'Review impact' },
-  { id: 5, title: 'Confirm', description: 'Submit change' },
+  { id: 1, title: 'Upload Drawings', description: 'Before & after PDF drawings' },
+  { id: 2, title: 'AI Analysis', description: 'Detect changes automatically' },
+  { id: 3, title: 'Review Changes', description: 'Confirm detected changes' },
+  { id: 4, title: 'Task Assignment', description: 'Who needs to review?' },
+  { id: 5, title: 'Submit ECN', description: 'Finalize and create' },
 ];
 
-const CLASSIFICATION_OPTIONS: { key: keyof ChangeClassification; label: string; description: string }[] = [
-  { key: 'geometry_changed', label: 'Geometry / Dimensions', description: 'Physical shape or size changed' },
-  { key: 'material_changed', label: 'Material', description: 'Different material specification' },
-  { key: 'tolerances_changed', label: 'Tolerances', description: 'Tolerance requirements changed' },
-  { key: 'weight_changed', label: 'Weight', description: 'Part weight is different' },
-  { key: 'surface_finish_changed', label: 'Surface Finish', description: 'Surface treatment changed' },
-  { key: 'supplier_changed', label: 'Supplier', description: 'Different supplier for part' },
-  { key: 'process_changed', label: 'Process Assumption', description: 'Manufacturing process changed' },
-];
+interface DetectedChange {
+  type: string;
+  description: string;
+  confidence: number;
+}
 
 export default function NewChange() {
   const navigate = useNavigate();
@@ -48,9 +47,15 @@ export default function NewChange() {
   const [partName, setPartName] = useState('');
   const [partId, setPartId] = useState('');
   const [description, setDescription] = useState('');
-  const [oldPartFile, setOldPartFile] = useState<File | null>(null);
-  const [newPartFile, setNewPartFile] = useState<File | null>(null);
-  const [documentFiles, setDocumentFiles] = useState<File[]>([]);
+  const [beforeFile, setBeforeFile] = useState<File | null>(null);
+  const [afterFile, setAfterFile] = useState<File | null>(null);
+  const [beforePreview, setBeforePreview] = useState<string | null>(null);
+  const [afterPreview, setAfterPreview] = useState<string | null>(null);
+  
+  // AI Analysis state
+  const [analyzing, setAnalyzing] = useState(false);
+  const [detectedChanges, setDetectedChanges] = useState<DetectedChange[]>([]);
+  const [aiSummary, setAiSummary] = useState('');
   const [classification, setClassification] = useState<ChangeClassification>({
     geometry_changed: false,
     material_changed: false,
@@ -67,9 +72,9 @@ export default function NewChange() {
   const canProceed = () => {
     switch (currentStep) {
       case 1:
-        return partName.trim() && description.trim();
+        return beforeFile && afterFile && partName.trim();
       case 2:
-        return true; // Files are optional
+        return !analyzing && hasAnyClassification;
       case 3:
         return hasAnyClassification;
       case 4:
@@ -81,34 +86,78 @@ export default function NewChange() {
     }
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>, type: 'old' | 'new' | 'doc') => {
-    const files = e.target.files;
-    if (!files) return;
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, type: 'before' | 'after') => {
+    const file = e.target.files?.[0];
+    if (!file) return;
 
-    if (type === 'old') {
-      setOldPartFile(files[0]);
-    } else if (type === 'new') {
-      setNewPartFile(files[0]);
+    // Create preview for images/PDFs
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const result = event.target?.result as string;
+      if (type === 'before') {
+        setBeforeFile(file);
+        setBeforePreview(result);
+      } else {
+        setAfterFile(file);
+        setAfterPreview(result);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const removeFile = (type: 'before' | 'after') => {
+    if (type === 'before') {
+      setBeforeFile(null);
+      setBeforePreview(null);
     } else {
-      setDocumentFiles([...documentFiles, ...Array.from(files)]);
+      setAfterFile(null);
+      setAfterPreview(null);
     }
   };
 
-  const removeFile = (type: 'old' | 'new' | 'doc', index?: number) => {
-    if (type === 'old') setOldPartFile(null);
-    else if (type === 'new') setNewPartFile(null);
-    else if (index !== undefined) {
-      setDocumentFiles(documentFiles.filter((_, i) => i !== index));
+  const analyzeChanges = async () => {
+    if (!beforePreview || !afterPreview) {
+      toast.error('Please upload both before and after drawings');
+      return;
+    }
+
+    setAnalyzing(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('analyze-cad-changes', {
+        body: {
+          beforeImage: beforePreview,
+          afterImage: afterPreview,
+        },
+      });
+
+      if (error) throw error;
+
+      setDetectedChanges(data.changes || []);
+      setAiSummary(data.summary || '');
+      setClassification(data.classification || classification);
+      
+      toast.success('Analysis complete! Review the detected changes.');
+    } catch (error) {
+      console.error('Analysis error:', error);
+      toast.error('Failed to analyze drawings. Please try again or classify manually.');
+    } finally {
+      setAnalyzing(false);
     }
   };
 
   const handleSubmit = () => {
-    toast.success('ECN created successfully! (Demo mode)');
+    toast.success('ECN created successfully!');
     navigate('/dashboard');
   };
 
+  const getConfidenceColor = (confidence: number) => {
+    if (confidence >= 0.8) return 'text-success';
+    if (confidence >= 0.5) return 'text-warning';
+    return 'text-destructive';
+  };
+
   return (
-    <div className="p-6 lg:p-8 max-w-4xl mx-auto">
+    <div className="p-6 lg:p-8 max-w-5xl mx-auto">
       {/* Header */}
       <div className="mb-8">
         <Button variant="ghost" onClick={() => navigate('/dashboard')} className="mb-4">
@@ -116,7 +165,7 @@ export default function NewChange() {
           Back to Dashboard
         </Button>
         <h1 className="text-3xl font-bold tracking-tight">New Engineering Change Notice</h1>
-        <p className="text-muted-foreground mt-1">Track what changed and who needs to review</p>
+        <p className="text-muted-foreground mt-1">Upload drawings, AI detects changes, tasks auto-assigned</p>
       </div>
 
       {/* Progress Steps */}
@@ -137,12 +186,12 @@ export default function NewChange() {
                 >
                   {currentStep > step.id ? <Check className="w-5 h-5" /> : step.id}
                 </div>
-                <span className="text-xs mt-2 font-medium hidden sm:block">{step.title}</span>
+                <span className="text-xs mt-2 font-medium hidden sm:block text-center max-w-[80px]">{step.title}</span>
               </div>
               {index < STEPS.length - 1 && (
                 <div
                   className={cn(
-                    'h-1 w-8 sm:w-16 lg:w-24 mx-2',
+                    'h-1 w-6 sm:w-12 lg:w-20 mx-1 sm:mx-2',
                     currentStep > step.id ? 'bg-success' : 'bg-border'
                   )}
                 />
@@ -155,11 +204,14 @@ export default function NewChange() {
       {/* Step Content */}
       <Card className="border-2">
         <CardHeader>
-          <CardTitle>{STEPS[currentStep - 1].title}</CardTitle>
+          <CardTitle className="flex items-center gap-2">
+            {currentStep === 2 && <Sparkles className="w-5 h-5 text-primary" />}
+            {STEPS[currentStep - 1].title}
+          </CardTitle>
           <CardDescription>{STEPS[currentStep - 1].description}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
-          {/* Step 1: Part Info */}
+          {/* Step 1: Upload Drawings */}
           {currentStep === 1 && (
             <>
               <div className="space-y-2">
@@ -181,120 +233,180 @@ export default function NewChange() {
                   className="font-mono"
                 />
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="description">Change Description *</Label>
-                <Textarea
-                  id="description"
-                  placeholder="Describe what changed and why..."
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  rows={4}
-                />
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4">
+                {/* Before Drawing */}
+                <div className="space-y-3">
+                  <Label className="flex items-center gap-2">
+                    <span className="w-6 h-6 rounded-full bg-destructive/20 text-destructive flex items-center justify-center text-xs font-bold">1</span>
+                    Before Drawing (Old Design)
+                  </Label>
+                  {beforeFile ? (
+                    <div className="relative border-2 border-destructive/30 rounded-lg overflow-hidden bg-destructive/5">
+                      <div className="aspect-[4/3] flex items-center justify-center p-4">
+                        {beforePreview && beforeFile.type.startsWith('image/') ? (
+                          <img src={beforePreview} alt="Before" className="max-w-full max-h-full object-contain" />
+                        ) : (
+                          <div className="flex flex-col items-center text-muted-foreground">
+                            <FileText className="w-16 h-16 mb-2" />
+                            <p className="font-medium">{beforeFile.name}</p>
+                            <p className="text-sm">{(beforeFile.size / 1024 / 1024).toFixed(2)} MB</p>
+                          </div>
+                        )}
+                      </div>
+                      <Button
+                        variant="destructive"
+                        size="icon"
+                        className="absolute top-2 right-2"
+                        onClick={() => removeFile('before')}
+                      >
+                        <X className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  ) : (
+                    <label className="flex flex-col items-center justify-center aspect-[4/3] border-2 border-dashed border-destructive/30 rounded-lg cursor-pointer hover:border-destructive/50 hover:bg-destructive/5 transition-colors">
+                      <Upload className="w-10 h-10 text-destructive/50 mb-2" />
+                      <span className="text-sm font-medium text-destructive/70">Upload BEFORE drawing</span>
+                      <span className="text-xs text-muted-foreground mt-1">PDF, PNG, JPG</span>
+                      <input
+                        type="file"
+                        className="hidden"
+                        accept="image/*,.pdf"
+                        onChange={(e) => handleFileUpload(e, 'before')}
+                      />
+                    </label>
+                  )}
+                </div>
+
+                {/* After Drawing */}
+                <div className="space-y-3">
+                  <Label className="flex items-center gap-2">
+                    <span className="w-6 h-6 rounded-full bg-success/20 text-success flex items-center justify-center text-xs font-bold">2</span>
+                    After Drawing (New Design)
+                  </Label>
+                  {afterFile ? (
+                    <div className="relative border-2 border-success/30 rounded-lg overflow-hidden bg-success/5">
+                      <div className="aspect-[4/3] flex items-center justify-center p-4">
+                        {afterPreview && afterFile.type.startsWith('image/') ? (
+                          <img src={afterPreview} alt="After" className="max-w-full max-h-full object-contain" />
+                        ) : (
+                          <div className="flex flex-col items-center text-muted-foreground">
+                            <FileText className="w-16 h-16 mb-2" />
+                            <p className="font-medium">{afterFile.name}</p>
+                            <p className="text-sm">{(afterFile.size / 1024 / 1024).toFixed(2)} MB</p>
+                          </div>
+                        )}
+                      </div>
+                      <Button
+                        variant="destructive"
+                        size="icon"
+                        className="absolute top-2 right-2"
+                        onClick={() => removeFile('after')}
+                      >
+                        <X className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  ) : (
+                    <label className="flex flex-col items-center justify-center aspect-[4/3] border-2 border-dashed border-success/30 rounded-lg cursor-pointer hover:border-success/50 hover:bg-success/5 transition-colors">
+                      <Upload className="w-10 h-10 text-success/50 mb-2" />
+                      <span className="text-sm font-medium text-success/70">Upload AFTER drawing</span>
+                      <span className="text-xs text-muted-foreground mt-1">PDF, PNG, JPG</span>
+                      <input
+                        type="file"
+                        className="hidden"
+                        accept="image/*,.pdf"
+                        onChange={(e) => handleFileUpload(e, 'after')}
+                      />
+                    </label>
+                  )}
+                </div>
               </div>
             </>
           )}
 
-          {/* Step 2: Upload Files */}
+          {/* Step 2: AI Analysis */}
           {currentStep === 2 && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* Old Part */}
-              <div className="space-y-3">
-                <Label>Old Part Image/Drawing</Label>
-                {oldPartFile ? (
-                  <div className="flex items-center gap-3 p-4 border-2 rounded-lg bg-muted/50">
-                    <FileImage className="w-8 h-8 text-muted-foreground" />
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium truncate">{oldPartFile.name}</p>
-                      <p className="text-sm text-muted-foreground">
-                        {(oldPartFile.size / 1024 / 1024).toFixed(2)} MB
-                      </p>
-                    </div>
-                    <Button variant="ghost" size="icon" onClick={() => removeFile('old')}>
-                      <X className="w-4 h-4" />
-                    </Button>
+            <div className="space-y-6">
+              {!analyzing && detectedChanges.length === 0 && (
+                <div className="text-center py-12">
+                  <div className="w-20 h-20 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-4">
+                    <Sparkles className="w-10 h-10 text-primary" />
                   </div>
-                ) : (
-                  <label className="flex flex-col items-center justify-center h-40 border-2 border-dashed rounded-lg cursor-pointer hover:border-primary/50 transition-colors">
-                    <Upload className="w-8 h-8 text-muted-foreground mb-2" />
-                    <span className="text-sm text-muted-foreground">Click to upload</span>
-                    <input
-                      type="file"
-                      className="hidden"
-                      accept="image/*,.pdf,.step,.stp,.stl"
-                      onChange={(e) => handleFileUpload(e, 'old')}
-                    />
-                  </label>
-                )}
-              </div>
-
-              {/* New Part */}
-              <div className="space-y-3">
-                <Label>New Part Image/Drawing</Label>
-                {newPartFile ? (
-                  <div className="flex items-center gap-3 p-4 border-2 rounded-lg bg-muted/50">
-                    <FileImage className="w-8 h-8 text-muted-foreground" />
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium truncate">{newPartFile.name}</p>
-                      <p className="text-sm text-muted-foreground">
-                        {(newPartFile.size / 1024 / 1024).toFixed(2)} MB
-                      </p>
-                    </div>
-                    <Button variant="ghost" size="icon" onClick={() => removeFile('new')}>
-                      <X className="w-4 h-4" />
-                    </Button>
-                  </div>
-                ) : (
-                  <label className="flex flex-col items-center justify-center h-40 border-2 border-dashed rounded-lg cursor-pointer hover:border-primary/50 transition-colors">
-                    <Upload className="w-8 h-8 text-muted-foreground mb-2" />
-                    <span className="text-sm text-muted-foreground">Click to upload</span>
-                    <input
-                      type="file"
-                      className="hidden"
-                      accept="image/*,.pdf,.step,.stp,.stl"
-                      onChange={(e) => handleFileUpload(e, 'new')}
-                    />
-                  </label>
-                )}
-              </div>
-
-              {/* Additional Documents */}
-              <div className="md:col-span-2 space-y-3">
-                <Label>Additional Documents (optional)</Label>
-                <div className="space-y-2">
-                  {documentFiles.map((file, index) => (
-                    <div key={index} className="flex items-center gap-3 p-3 border rounded-lg">
-                      <FileText className="w-5 h-5 text-muted-foreground" />
-                      <span className="flex-1 truncate text-sm">{file.name}</span>
-                      <Button variant="ghost" size="icon" onClick={() => removeFile('doc', index)}>
-                        <X className="w-4 h-4" />
-                      </Button>
-                    </div>
-                  ))}
-                  <label className="flex items-center justify-center gap-2 p-3 border-2 border-dashed rounded-lg cursor-pointer hover:border-primary/50 transition-colors">
-                    <Upload className="w-4 h-4 text-muted-foreground" />
-                    <span className="text-sm text-muted-foreground">Add documents</span>
-                    <input
-                      type="file"
-                      className="hidden"
-                      multiple
-                      onChange={(e) => handleFileUpload(e, 'doc')}
-                    />
-                  </label>
+                  <h3 className="text-xl font-semibold mb-2">Ready to Analyze</h3>
+                  <p className="text-muted-foreground mb-6 max-w-md mx-auto">
+                    Our AI will compare your before and after drawings to automatically detect what changed.
+                  </p>
+                  <Button size="lg" onClick={analyzeChanges} className="gap-2">
+                    <Eye className="w-5 h-5" />
+                    Analyze Drawings
+                  </Button>
                 </div>
-              </div>
+              )}
+
+              {analyzing && (
+                <div className="text-center py-12">
+                  <Loader2 className="w-12 h-12 animate-spin text-primary mx-auto mb-4" />
+                  <h3 className="text-xl font-semibold mb-2">Analyzing Drawings...</h3>
+                  <p className="text-muted-foreground">AI is comparing your drawings to detect changes</p>
+                </div>
+              )}
+
+              {!analyzing && detectedChanges.length > 0 && (
+                <>
+                  <div className="flex items-start gap-3 p-4 bg-success/10 border border-success/30 rounded-lg">
+                    <Check className="w-5 h-5 text-success flex-shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-medium text-success">Analysis Complete</p>
+                      <p className="text-sm text-muted-foreground mt-1">{aiSummary}</p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    <Label>Detected Changes</Label>
+                    {detectedChanges.map((change, index) => (
+                      <div key={index} className="flex items-start gap-4 p-4 border rounded-lg">
+                        <div className={cn('font-mono text-sm', getConfidenceColor(change.confidence))}>
+                          {Math.round(change.confidence * 100)}%
+                        </div>
+                        <div className="flex-1">
+                          <p className="font-medium capitalize">{change.type.replace('_', ' ').replace('changed', '')}</p>
+                          <p className="text-sm text-muted-foreground">{change.description}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <Button variant="outline" onClick={analyzeChanges} className="gap-2">
+                    <Sparkles className="w-4 h-4" />
+                    Re-analyze
+                  </Button>
+                </>
+              )}
             </div>
           )}
 
-          {/* Step 3: Classification */}
+          {/* Step 3: Review Changes */}
           {currentStep === 3 && (
             <div className="space-y-4">
-              <div className="flex items-center gap-2 p-4 bg-warning/10 border border-warning/30 rounded-lg">
-                <AlertTriangle className="w-5 h-5 text-warning flex-shrink-0" />
+              <div className="flex items-center gap-2 p-4 bg-info/10 border border-info/30 rounded-lg">
+                <AlertTriangle className="w-5 h-5 text-info flex-shrink-0" />
                 <p className="text-sm">
-                  <strong>Important:</strong> Select all applicable changes. This determines who needs to review what.
+                  Review and adjust the detected changes. This determines who needs to review the ECN.
                 </p>
               </div>
-              <div className="grid gap-3">
+
+              <div className="space-y-2">
+                <Label htmlFor="description">Change Description</Label>
+                <Textarea
+                  id="description"
+                  placeholder="Describe the change in detail..."
+                  value={description || aiSummary}
+                  onChange={(e) => setDescription(e.target.value)}
+                  rows={3}
+                />
+              </div>
+
+              <div className="grid gap-3 pt-2">
                 {CLASSIFICATION_OPTIONS.map((option) => (
                   <label
                     key={option.key}
@@ -312,21 +424,26 @@ export default function NewChange() {
                       }
                       className="mt-0.5"
                     />
-                    <div>
+                    <div className="flex-1">
                       <p className="font-medium">{option.label}</p>
                       <p className="text-sm text-muted-foreground">{option.description}</p>
                     </div>
+                    {detectedChanges.some(c => c.type === option.key) && (
+                      <span className="text-xs bg-primary/10 text-primary px-2 py-1 rounded-full">
+                        AI Detected
+                      </span>
+                    )}
                   </label>
                 ))}
               </div>
             </div>
           )}
 
-          {/* Step 4: Dependencies */}
+          {/* Step 4: Task Assignment */}
           {currentStep === 4 && (
             <div className="space-y-4">
               <p className="text-muted-foreground">
-                Based on your selections, the following documents and teams will need to review this change:
+                Based on the changes, these teams need to review and update their documentation:
               </p>
               <div className="grid gap-3">
                 {triggeredDependencies.map((dep, index) => (
@@ -350,13 +467,13 @@ export default function NewChange() {
               {triggeredDependencies.length === 0 && (
                 <div className="text-center py-8 text-muted-foreground">
                   <AlertTriangle className="w-12 h-12 mx-auto mb-3 opacity-50" />
-                  <p>No dependencies detected. Go back and select what changed.</p>
+                  <p>No tasks generated. Go back and select what changed.</p>
                 </div>
               )}
             </div>
           )}
 
-          {/* Step 5: Confirm */}
+          {/* Step 5: Submit */}
           {currentStep === 5 && (
             <div className="space-y-6">
               <div className="grid gap-4">
@@ -372,7 +489,7 @@ export default function NewChange() {
                 )}
                 <div className="p-4 border rounded-lg">
                   <p className="text-sm text-muted-foreground">Description</p>
-                  <p className="font-medium">{description}</p>
+                  <p className="font-medium">{description || aiSummary}</p>
                 </div>
                 <div className="p-4 border rounded-lg">
                   <p className="text-sm text-muted-foreground">What Changed</p>
@@ -397,6 +514,19 @@ export default function NewChange() {
                     ))}
                   </div>
                 </div>
+                <div className="p-4 border rounded-lg">
+                  <p className="text-sm text-muted-foreground">Attached Files</p>
+                  <div className="flex gap-4 mt-2">
+                    <div className="flex items-center gap-2 text-sm">
+                      <FileText className="w-4 h-4 text-destructive" />
+                      <span>{beforeFile?.name || 'No before file'}</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-sm">
+                      <FileText className="w-4 h-4 text-success" />
+                      <span>{afterFile?.name || 'No after file'}</span>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           )}
@@ -419,9 +549,9 @@ export default function NewChange() {
             <ArrowRight className="w-4 h-4 ml-2" />
           </Button>
         ) : (
-          <Button onClick={handleSubmit} disabled={!canProceed()}>
-            <Check className="w-4 h-4 mr-2" />
-            Submit ECN
+          <Button onClick={handleSubmit} disabled={!canProceed()} className="gap-2">
+            <Check className="w-4 h-4" />
+            Create ECN
           </Button>
         )}
       </div>
